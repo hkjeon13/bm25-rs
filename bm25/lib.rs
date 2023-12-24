@@ -7,6 +7,7 @@ use tqdm_rs;
 use counter::Counter;
 use rayon::prelude::*;
 use pyo3::types::PyType;
+use std;
 
 fn _calculate(tf: f32, num_docs: f32, doc_len: usize, average_length: f32, k1: f32, b: f32, df: f32) -> f32 {
     (tf * (k1 + 1.0)) / (tf + k1 * (1.0 - b + b * (doc_len as f32 / average_length))) * (((num_docs as f32 + 1.0) / (df + 1.0)).ln() + 1.0)
@@ -104,7 +105,7 @@ impl BM25 {
             }
         }
         let mut scores = scores.iter().map(|(k, v)| (k.to_string(), v.to_owned())).collect::<Vec<(String, f32)>>();
-        scores.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
+        scores.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
         scores.truncate(n);
         Ok(scores)
     }
