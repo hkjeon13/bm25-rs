@@ -86,7 +86,7 @@ impl BM25 {
             ).collect::<HashMap<String, HashMap<String, f32>>>();
     }
 
-    
+
 
     fn search(&self, query_tokens: Vec<String>, n: usize) -> PyResult<Vec<(String, f32)>> {
         if self.freeze_map.len() == 0 {
@@ -115,6 +115,23 @@ impl BM25 {
         Ok(tokenized_queries.par_iter().map(
             |tokenized_query| self.search(tokenized_query.to_vec(), n).unwrap()
         ).collect())
+    }
+
+    fn delete_document(&mut self, id: String) {
+        for (token, _) in self.index_map.iter_mut() {
+            let target = self.index_map.get_mut(token).unwrap();
+            if target.contains_key(id.as_str()) {
+                target.remove(id.as_str());
+            }
+        }
+        self.doc_len_map.remove(id.as_str());
+        //remove document from freeze_map
+        for (token, _) in self.freeze_map.iter_mut() {
+            let target = self.freeze_map.get_mut(token).unwrap();
+            if target.contains_key(id.as_str()) {
+                target.remove(id.as_str());
+            }
+        }
     }
 
 }
