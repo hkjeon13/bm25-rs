@@ -118,21 +118,32 @@ impl BM25 {
     }
 
     fn delete_document(&mut self, id: String) {
-        for (token, _) in self.index_map.iter_mut() {
-            let target = self.index_map.get_mut(token).unwrap();
-            if target.contains_key(id.as_str()) {
-                target.remove(id.as_str());
-            }
+        // Collect tokens to be modified from index_map
+        let tokens_to_modify: Vec<String> = self.index_map.iter()
+            .filter(|(_, target)| target.contains_key(&id))
+            .map(|(token, _)| token.clone())
+            .collect();
+
+        // Perform modifications
+        for token in tokens_to_modify {
+            self.index_map.get_mut(&token).unwrap().remove(&id);
         }
-        self.doc_len_map.remove(id.as_str());
-        //remove document from freeze_map
-        for (token, _) in self.freeze_map.iter_mut() {
-            let target = self.freeze_map.get_mut(token).unwrap();
-            if target.contains_key(id.as_str()) {
-                target.remove(id.as_str());
+
+        self.doc_len_map.remove(&id);
+
+        // Perform similar steps for freeze_map if it's not empty
+        if !self.freeze_map.is_empty() {
+            let freeze_tokens_to_modify: Vec<String> = self.freeze_map.iter()
+                .filter(|(_, target)| target.contains_key(&id))
+                .map(|(token, _)| token.clone())
+                .collect();
+
+            for token in freeze_tokens_to_modify {
+                self.freeze_map.get_mut(&token).unwrap().remove(&id);
             }
         }
     }
+
 
 }
 
