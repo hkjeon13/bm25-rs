@@ -45,6 +45,9 @@ impl BM25 {
         std::fs::write(path, json_file).expect("Unable to write file");
     }
 
+    fn get_freeze_map(&self) -> PyResult<usize>{
+        Ok(self.freeze_map.len())
+    }
 
     fn add_document(&mut self, id: String, document: Vec<String>) {
         for token in document.iter() {
