@@ -45,7 +45,7 @@ impl BM25 {
         std::fs::write(path, json_file).expect("Unable to write file");
     }
 
-    fn get_freeze_map(&self) -> PyResult<usize>{
+    fn get_freeze_map_length(&self) -> PyResult<usize>{
         Ok(self.freeze_map.len())
     }
 
