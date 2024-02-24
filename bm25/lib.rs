@@ -1,41 +1,65 @@
 extern crate pyo3;
-use pyo3::prelude::*;
-use std::collections::{HashMap, HashSet};
-use serde_derive::{Serialize,Deserialize};
-use std::path::Path;
-use tqdm_rs;
-use counter::Counter;
-use rayon::prelude::*;
-use pyo3::types::PyType;
+
 use std;
+use std::collections::HashMap;
 
-fn _calculate(tf: f32, num_docs: f32, doc_len: usize, average_length: f32, k1: f32, b: f32, df: f32) -> f32 {
-    (tf * (k1 + 1.0)) / (tf + k1 * (1.0 - b + b * (doc_len as f32 / average_length))) * (((num_docs as f32 + 1.0) / (df + 1.0)).ln() + 1.0)
-}
-
+use pyo3::prelude::*;
+use pyo3::types::PyType;
+use rayon::prelude::*;
+use serde_derive::{Deserialize, Serialize};
 
 #[pyclass]
 #[derive(Serialize, Deserialize, Debug)]
 struct BM25 {
     index_map: HashMap<String, HashMap<String, u32>>,
     doc_len_map: HashMap<String, usize>,
+    doc_texts: HashMap<String, String>,
     freeze_map: HashMap<String, HashMap<String, f32>>,
     k1: f32,
     b: f32,
     average_length: f32,
 }
 
+impl BM25 {
+    fn calculate_score(&self, tf: f32, df: f32, doc_len: usize) -> f32 {
+        let num_docs = self.doc_len_map.len() as f32;
+        let k1 = self.k1;
+        let b = self.b;
+        let average_length = self.average_length;
+        (tf * (k1 + 1.0)) / (tf + k1 * (1.0 - b + b * (doc_len as f32 / average_length))) * (((num_docs + 1.0) / (df + 1.0)).ln() + 1.0)
+    }
+
+    fn update_freeze_map(&mut self) {
+        self.average_length = self.doc_len_map.values().sum::<usize>() as f32 / self.doc_len_map.len() as f32;
+        self.freeze_map = self.index_map.iter().map(|(token, doc_freq)| {
+            (token.clone(), doc_freq.iter().map(|(doc_id, &tf)| {
+                let doc_len = *self.doc_len_map.get(doc_id).unwrap_or(&0);
+                let df = doc_freq.len() as f32;
+                let score = self.calculate_score(tf as f32, df, doc_len);
+                (doc_id.clone(), score)
+            }).collect())
+        }).collect();
+    }
+}
 
 
 #[pymethods]
 impl BM25 {
     #[new]
     fn new() -> Self {
-        BM25 { index_map: HashMap::new(), doc_len_map: HashMap::new(), freeze_map: HashMap::new(), k1: 1.5, b: 0.75, average_length: 0.0}
+        BM25 {
+            index_map: HashMap::new(),
+            doc_len_map: HashMap::new(),
+            doc_texts: HashMap::new(),
+            freeze_map: HashMap::new(),
+            k1: 1.5,
+            b: 0.75,
+            average_length: 0.0,
+        }
     }
 
     #[classmethod]
-    fn load(cls: &PyType, path:String) -> Self {
+    fn load(_cls: &PyType, path: String) -> Self {
         let json_file = std::fs::read_to_string(path).expect("Unable to read file");
         serde_json::from_str(&json_file).unwrap()
     }
@@ -45,12 +69,12 @@ impl BM25 {
         std::fs::write(path, json_file).expect("Unable to write file");
     }
 
-    fn get_freeze_map_length(&self) -> PyResult<usize>{
+    fn get_freeze_map_length(&self) -> PyResult<usize> {
         Ok(self.freeze_map.len())
     }
 
-    fn add_document(&mut self, id: String, document: Vec<String>) {
-        for token in document.iter() {
+    fn add_document(&mut self, id: String, tokens: Vec<String>, text: String) {
+        for token in tokens.iter() {
             if !self.index_map.contains_key(token) {
                 self.index_map.insert(
                     token.to_string(),
@@ -64,63 +88,46 @@ impl BM25 {
 
             *target.get_mut(id.as_str()).unwrap() += 1;
         }
-        self.doc_len_map.insert(id.to_string(), document.len());
+        self.doc_len_map.insert(id.to_string(), tokens.len());
+        self.doc_texts.insert(id.to_string(), text);
     }
 
     fn freeze(&mut self) {
-        //todo!
-        self.average_length = self.doc_len_map.values().sum::<usize>() as f32 / self.doc_len_map.len() as f32;
-        self.freeze_map = self.index_map.iter()
-            .map(|(k, doc_freq)| (k.to_string(), doc_freq.iter()
-                .map(|(dk, dv)|
-                    (
-                        dk.to_string(),
-                        _calculate(
-                            *dv as f32,
-                            self.doc_len_map.len() as f32,
-                            self.doc_len_map.get(dk).unwrap().clone(),
-                            self.average_length,
-                            self.k1,
-                            self.b,
-                            doc_freq.len() as f32,
-                        )
-                    )
-                ).collect::<HashMap<String, f32>>())
-            ).collect::<HashMap<String, HashMap<String, f32>>>();
+        self.update_freeze_map();
+    }
+
+    fn search(&self, query_tokens: Vec<String>, n: usize) -> PyResult<Vec<(f32, String, String)>> {
+        if self.freeze_map.is_empty() {
+            return Err(PyErr::new::<pyo3::exceptions::PyRuntimeError, _>("Index is not frozen."));
+        }
+
+        let scores = query_tokens.iter()
+            .filter_map(|token| self.freeze_map.get(token))
+            .flat_map(|doc_scores| doc_scores)
+            .fold(HashMap::new(), |mut acc, (doc_id, &score)| {
+                *acc.entry(doc_id.clone()).or_insert(0.0) += score;
+                acc
+            });
+
+        let mut results: Vec<_> = scores.into_iter()
+            .filter_map(
+                |(id, score)|
+                    Some((score, id.clone(), self.doc_texts.get(&id)?.clone()))
+            ).collect();
+
+        results.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
+        results.truncate(n);
+        Ok(results)
     }
 
 
-
-    fn search(&self, query_tokens: Vec<String>, n: usize) -> PyResult<Vec<(String, f32)>> {
-        if self.freeze_map.len() == 0 {
-            panic!("Please freeze the index before searching!");
-        }
-        let mut scores = HashMap::new();
-        for (query, _) in query_tokens.iter().collect::<Counter<_>>().iter(){
-            if self.freeze_map.contains_key(query.as_str()){
-                let targets = self.freeze_map.get(query.as_str()).unwrap();
-                for (doc_id, score) in targets {
-                    if !scores.contains_key(doc_id.as_str()) {
-                        scores.insert(doc_id.to_string(), 0.0);
-                    }
-                    *scores.get_mut(doc_id.as_str()).unwrap() += score;
-                }
-            }
-        }
-        let mut scores = scores.iter().map(|(k, v)| (k.to_string(), v.to_owned())).collect::<Vec<(String, f32)>>();
-        scores.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-        scores.truncate(n);
-        Ok(scores)
-    }
-    
-
-    fn batch_search(&self, tokenized_queries: Vec<Vec<String>>, n: usize) -> PyResult<Vec<Vec<(String, f32)>>> {
+    fn batch_search(&self, tokenized_queries: Vec<Vec<String>>, n: usize) -> PyResult<Vec<Vec<(f32, String, String)>>> {
         Ok(tokenized_queries.par_iter().map(
             |tokenized_query| self.search(tokenized_query.to_vec(), n).unwrap()
         ).collect())
     }
 
-    fn delete_document(&mut self, id: String) {
+    fn remove_document(&mut self, id: String) {
         // Collect tokens to be modified from index_map
         let tokens_to_modify: Vec<String> = self.index_map.iter()
             .filter(|(_, target)| target.contains_key(&id))
@@ -133,6 +140,7 @@ impl BM25 {
         }
 
         self.doc_len_map.remove(&id);
+        self.doc_texts.remove(&id);
 
         // Perform similar steps for freeze_map if it's not empty
         if !self.freeze_map.is_empty() {
@@ -146,8 +154,6 @@ impl BM25 {
             }
         }
     }
-
-
 }
 
 #[pymodule]
