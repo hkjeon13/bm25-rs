@@ -69,9 +69,41 @@ impl BM25 {
         std::fs::write(path, json_file).expect("Unable to write file");
     }
 
-    fn get_freeze_map_length(&self) -> PyResult<usize> {
-        Ok(self.freeze_map.len())
+    fn get_freeze_map(&self) -> PyResult<HashMap<String, HashMap<String, f32>>> {
+        Ok(self.freeze_map.clone())
     }
+
+    fn set_k1(&mut self, k1: f32) {
+        self.k1 = k1;
+    }
+
+    fn set_b(&mut self, b: f32) {
+        self.b = b;
+    }
+
+    fn get_doc_texts(&self) -> PyResult<HashMap<String, String>> {
+        Ok(self.doc_texts.clone())
+    }
+
+    fn get_index_map(&self) -> PyResult<HashMap<String, HashMap<String, u32>>> {
+        Ok(self.index_map.clone())
+    }
+
+    fn get_doc_len_map(&self) -> PyResult<HashMap<String, usize>> {
+        Ok(self.doc_len_map.clone())
+    }
+
+    fn set_doc_texts(&mut self, doc_texts: HashMap<String, String>) {
+        self.doc_texts = doc_texts;
+    }
+    fn set_index_map(&mut self, index_map: HashMap<String, HashMap<String, u32>>) {
+        self.index_map = index_map;
+    }
+
+    fn set_doc_len_map(&mut self, doc_len_map: HashMap<String, usize>) {
+        self.doc_len_map = doc_len_map;
+    }
+
 
     fn add_document(&mut self, id: String, tokens: Vec<String>, text: String) {
         for token in tokens.iter() {
