@@ -12,7 +12,7 @@ path = "bm25/lib.rs"
 crate-type = ["cdylib"]
 
 [dependencies]
-serde_derive = "1.0.117"
+serde_derive = "*"
 serde_json = "*"
 serde = "*"
 tqdm-rs = "*"
