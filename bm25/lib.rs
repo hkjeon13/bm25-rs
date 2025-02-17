@@ -20,6 +20,7 @@ struct BM25 {
     average_length: f32,
 }
 
+
 impl BM25 {
     fn calculate_score(&self, tf: f32, df: f32, doc_len: usize) -> f32 {
         let num_docs = self.doc_len_map.len() as f32;
@@ -74,6 +75,9 @@ impl BM25 {
     }
 
     fn set_k1(&mut self, k1: f32) {
+        if k1 < 0.0 || k1 > 2.0 {
+            panic!("k1 must be between 0.0 and 2.0");
+        }
         self.k1 = k1;
     }
 
@@ -144,7 +148,7 @@ impl BM25 {
         let mut results: Vec<_> = scores.into_iter()
             .filter_map(
                 |(id, score)|
-                    Some((score, id.clone(), self.doc_texts.get(&id)?.clone()))
+                    Some((score, id.to_owned(), self.doc_texts.get(&id)?.to_owned()))
             ).collect();
 
         results.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
