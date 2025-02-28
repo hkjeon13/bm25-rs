@@ -24,5 +24,5 @@ PyPI에 배포되어 있는 BM25모듈인 rank_bm25.BM25Okapi 와 속도 비교(
 
 ## Install 
 ```angular2html
-pip install git+https://ldccai.lotte.net/gitlab/psyche/bm25-rs.git
+pip install git+https://github.com/hkjeon13/bm25-rs.git
 ```
