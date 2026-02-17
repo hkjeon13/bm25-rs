@@ -8,9 +8,9 @@ with open("README.md", mode="r", encoding="utf-8") as readme:
 
 setup(
     name='bm25',
-    version="0.0.0.1",
+    version="0.0.2",
     description='BM25 in Rust',
-    long_description="No Description",
+    long_description=long_description,
     long_description_content_type="text/markdown",
     url="https://gitlab.com/wisenut-research/nlp/bm25-rs",
     author="Eddie",

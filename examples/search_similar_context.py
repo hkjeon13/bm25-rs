@@ -14,19 +14,19 @@ class DataParams:
         metadata={"help": "데이터셋의 이름 또는 경로를 입력합니다."}
     )
 
-    data_auth_token: str = field(
-        default="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",
+    data_auth_token: Optional[str] = field(
+        default=None,
         metadata={"help": "비공개 데이터셋을 다운로드하기 위한 토큰을 설정합니다."}
     )
 
     data_id_column: str = field(
         default="id",
-        metadata = {"help":"데이터 셋의 ID 컬럼의 이름을 입력합니다."}
+        metadata={"help": "데이터 셋의 ID 컬럼의 이름을 입력합니다."}
     )
 
     data_text_column: str = field(
         default="text",
-        metadata = {"help":"데이터 셋의 텍스트 컬럼의 이름을 입력합니다."}
+        metadata={"help": "데이터 셋의 텍스트 컬럼의 이름을 입력합니다."}
     )
 
     pre_tokenized_data_name_or_path: Optional[str] = field(
@@ -34,8 +34,8 @@ class DataParams:
         metadata={"help": "토큰화된 데이터셋의 이름 또는 경로를 입력합니다."}
     )
 
-    pre_tokenized_data_auth_token: str = field(
-        default="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",
+    pre_tokenized_data_auth_token: Optional[str] = field(
+        default=None,
         metadata={"help": "비공개 토큰화된 데이터셋을 다운로드하기 위한 토큰을 설정합니다."}
     )
 
@@ -49,67 +49,75 @@ class DataParams:
         metadata={"help": "타깃 데이터셋의 이름 또는 경로를 입력합니다."}
     )
 
-    target_dataset_auth_token: str = field(
-        default="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",
+    target_dataset_auth_token: Optional[str] = field(
+        default=None,
         metadata={"help": "비공개 타깃 데이터셋을 다운로드하기 위한 토큰을 설정합니다."}
     )
 
     target_text_column: str = field(
         default="context",
-        metadata={"help": "비공개 타깃 데이터셋을 다운로드하기 위한 토큰을 설정합니다."}
+        metadata={"help": "타깃 데이터셋 텍스트 컬럼의 이름을 입력합니다."}
     )
 
-    output_dir:str = field(
-        default = "similar_text",
-        metadata = {"help":"데이터가 저장될 경로를 입력합니다."}
+    output_dir: str = field(
+        default="similar_text",
+        metadata={"help": "데이터가 저장될 경로를 입력합니다."}
     )
-
 
 
 def main():
     parser = HfArgumentParser((DataParams,))
-    data_args = parser.parse_args()
-    if data_args.pre_tokenized_data_name_or_path is None:
-        from konlpy.tag import Mecab
-        tokenizer = Mecab()
+    (data_args,) = parser.parse_args_into_dataclasses()
 
-        dataset = load_dataset(data_args.data_name_or_path, use_auth_token=data_args.data_auth_token,
-                               split=data_args.split_name)
+    from konlpy.tag import Mecab
+
+    tokenizer = Mecab()
+
+    if data_args.pre_tokenized_data_name_or_path is None:
+        dataset = load_dataset(
+            data_args.data_name_or_path,
+            token=data_args.data_auth_token,
+            split=data_args.split_name,
+        )
 
         def example_function(examples):
             return {
-                "doc_id": examples[data_args.data_id_column], 
-                "tokens": [tokenizer.nouns(text) for text in examples[data_args.data_text_column]]
+                "doc_id": examples[data_args.data_id_column],
+                "tokens": [tokenizer.nouns(text) for text in examples[data_args.data_text_column]],
             }
 
-        dataset = dataset.map(example_function, batched=True, num_proc=cpu_count(), remove_columns=[data_args.data_text_column])
+        dataset = dataset.map(example_function, batched=True, num_proc=cpu_count())
     else:
         dataset = load_dataset(
             data_args.pre_tokenized_data_name_or_path,
-            use_auth_token=data_args.pre_tokenized_data_auth_token,
-            split=data_args.split_name
+            token=data_args.pre_tokenized_data_auth_token,
+            split=data_args.split_name,
         )
 
-    
     bm25 = BM25()
     for d in tqdm(dataset):
-        bm25.add_document(d["doc_id"], d["tokens"])
-    
+        text = d[data_args.data_text_column] if data_args.data_text_column in d else " ".join(d["tokens"])
+        bm25.add_document(str(d["doc_id"]), d["tokens"], text)
+
+    bm25.freeze()
 
     target_dataset = load_dataset(
         data_args.target_dataset_name_or_path,
-        use_auth_token=data_args.target_dataset_auth_token,
-        split=data_args.split_name
+        token=data_args.target_dataset_auth_token,
+        split=data_args.split_name,
     )
 
-    def example_function(examples):
-        tokens = [tokenizer.nouns(text) for text in examples[target_text_column]]
+    def tokenize_target(examples):
+        tokens = [tokenizer.nouns(text) for text in examples[data_args.target_text_column]]
         return {"tokens": tokens}
 
-    target_dataset = target_dataset.map(example_function, batched=True, num_proc=cpu_count())
+    target_dataset = target_dataset.map(tokenize_target, batched=True, num_proc=cpu_count())
 
     def get_similar_context(examples):
-        similar_context = [[v for v, _ in bm25.search(target_tokens, 100)] for target_tokens in examples["tokens"]]
+        similar_context = [
+            [_text for _score, _id, _text in bm25.search(target_tokens, 100)]
+            for target_tokens in examples["tokens"]
+        ]
         return {"similar_context": similar_context}
 
     target_dataset = target_dataset.map(get_similar_context, batched=True, remove_columns=["tokens"])
