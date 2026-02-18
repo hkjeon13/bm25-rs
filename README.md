@@ -1,6 +1,16 @@
 # bm25-rs
 BM-25 알고리즘을 Rust로 구현 및 Python으로 사용할 수 있게끔 하는 라이브러리
 
+# Quick Start
+```python
+from bm25 import BM25
+
+bm25 = BM25()
+bm25.add_document("doc1", ["나는", "밥을", "먹는다"], "나는 밥을 먹는다")
+bm25.freeze()
+print(bm25.search(["밥"], 1))
+```
+
 # Installation
 ## Requirements
 - Rust
@@ -24,5 +34,5 @@ PyPI에 배포되어 있는 BM25모듈인 rank_bm25.BM25Okapi 와 속도 비교(
 
 ## Install 
 ```angular2html
-pip install git+https://github.com/hkjeon13/bm25-rs.git
+pip install git+https://ldccai.lotte.net/gitlab/psyche/bm25-rs.git
 ```

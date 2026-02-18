@@ -2,7 +2,7 @@
 name = "bm25"
 version = "0.0.2"
 authors = ["psyche"]
-edition = "2018"
+edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -12,14 +12,17 @@ path = "bm25/lib.rs"
 crate-type = ["cdylib"]
 
 [dependencies]
-serde_derive = "*"
-serde_json = "*"
-serde = "*"
-tqdm-rs = "*"
-counter = "*"
-rayon = "*"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+bincode = "1"
+rmp-serde = "1"
+rayon = "1"
 
 
 [dependencies.pyo3]
-version = "0.17.0"
+version = "0.23"
 features = ["extension-module"]
+
+[profile.release]
+lto = true
+codegen-units = 1
