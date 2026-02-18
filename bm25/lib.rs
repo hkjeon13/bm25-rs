@@ -1,5 +1,6 @@
 use std::cmp::Ordering;
 use std::collections::{BinaryHeap, HashMap};
+use std::io::{BufReader, BufWriter};
 
 use pyo3::exceptions::{PyIOError, PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
@@ -247,24 +248,53 @@ impl BM25 {
     }
 
     #[classmethod]
-    fn load(_cls: &Bound<'_, PyType>, path: String) -> PyResult<Self> {
-        let json_file = std::fs::read_to_string(path)
-            .map_err(|e| PyErr::new::<PyIOError, _>(format!("Unable to read file: {e}")))?;
-        let mut loaded: Self = serde_json::from_str(&json_file)
-            .map_err(|e| PyErr::new::<PyValueError, _>(format!("Invalid BM25 JSON: {e}")))?;
-        // freeze_map is skipped during deserialization, so it's empty
-        // Recompute average_length from doc_len_map
-        loaded.update_average_length();
-        loaded.is_frozen = false;
-        Ok(loaded)
+    fn load(_cls: &Bound<'_, PyType>, py: Python<'_>, path: String) -> PyResult<Self> {
+        py.allow_threads(|| {
+            let file = std::fs::File::open(&path)
+                .map_err(|e| PyErr::new::<PyIOError, _>(format!("Unable to read file: {e}")))?;
+            let reader = BufReader::new(file);
+            let mut loaded: Self = serde_json::from_reader(reader)
+                .map_err(|e| PyErr::new::<PyValueError, _>(format!("Invalid BM25 JSON: {e}")))?;
+            loaded.update_average_length();
+            loaded.is_frozen = false;
+            Ok(loaded)
+        })
     }
 
-    fn save(&self, path: String) -> PyResult<()> {
-        let json_file = serde_json::to_string(&self)
-            .map_err(|e| PyErr::new::<PyValueError, _>(format!("Unable to serialize BM25: {e}")))?;
-        std::fs::write(path, json_file)
-            .map_err(|e| PyErr::new::<PyIOError, _>(format!("Unable to write file: {e}")))?;
-        Ok(())
+    fn save(&self, py: Python<'_>, path: String) -> PyResult<()> {
+        py.allow_threads(|| {
+            let file = std::fs::File::create(&path)
+                .map_err(|e| PyErr::new::<PyIOError, _>(format!("Unable to write file: {e}")))?;
+            let writer = BufWriter::new(file);
+            serde_json::to_writer(writer, &self)
+                .map_err(|e| PyErr::new::<PyValueError, _>(format!("Unable to serialize BM25: {e}")))?;
+            Ok(())
+        })
+    }
+
+    #[classmethod]
+    fn load_bin(_cls: &Bound<'_, PyType>, py: Python<'_>, path: String) -> PyResult<Self> {
+        py.allow_threads(|| {
+            let file = std::fs::File::open(&path)
+                .map_err(|e| PyErr::new::<PyIOError, _>(format!("Unable to read file: {e}")))?;
+            let reader = BufReader::new(file);
+            let mut loaded: Self = bincode::deserialize_from(reader)
+                .map_err(|e| PyErr::new::<PyValueError, _>(format!("Invalid BM25 binary: {e}")))?;
+            loaded.update_average_length();
+            loaded.is_frozen = false;
+            Ok(loaded)
+        })
+    }
+
+    fn save_bin(&self, py: Python<'_>, path: String) -> PyResult<()> {
+        py.allow_threads(|| {
+            let file = std::fs::File::create(&path)
+                .map_err(|e| PyErr::new::<PyIOError, _>(format!("Unable to write file: {e}")))?;
+            let writer = BufWriter::new(file);
+            bincode::serialize_into(writer, &self)
+                .map_err(|e| PyErr::new::<PyValueError, _>(format!("Unable to serialize BM25: {e}")))?;
+            Ok(())
+        })
     }
 
     fn get_freeze_map(&self) -> PyResult<HashMap<String, HashMap<String, f32>>> {
@@ -675,5 +705,34 @@ mod tests {
         let query = vec!["nonexistent".to_string()];
         let results = bm25.search_instance_internal(&query, 5);
         assert!(results.is_empty());
+    }
+
+    #[test]
+    fn test_bincode_roundtrip() {
+        let mut bm25 = make_bm25();
+        add_doc(&mut bm25, "d1", vec!["hello", "world"], "hello world");
+        add_doc(&mut bm25, "d2", vec!["foo", "bar"], "foo bar");
+
+        let encoded = bincode::serialize(&bm25).unwrap();
+        let decoded: BM25 = bincode::deserialize(&encoded).unwrap();
+
+        assert_eq!(decoded.doc_len_map.len(), 2);
+        assert_eq!(decoded.doc_texts.get("d1").unwrap(), "hello world");
+        assert_eq!(decoded.doc_texts.get("d2").unwrap(), "foo bar");
+        assert!(decoded.freeze_map.is_empty()); // skipped by serde
+    }
+
+    #[test]
+    fn test_json_streaming_roundtrip() {
+        let mut bm25 = make_bm25();
+        add_doc(&mut bm25, "d1", vec!["hello"], "hello");
+
+        // Simulate streaming write + read
+        let mut buf = Vec::new();
+        serde_json::to_writer(&mut buf, &bm25).unwrap();
+        let loaded: BM25 = serde_json::from_reader(buf.as_slice()).unwrap();
+
+        assert_eq!(loaded.doc_len_map.len(), 1);
+        assert_eq!(loaded.doc_texts.get("d1").unwrap(), "hello");
     }
 }
