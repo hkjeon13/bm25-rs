@@ -297,6 +297,31 @@ impl BM25 {
         })
     }
 
+    #[classmethod]
+    fn load_msgpack(_cls: &Bound<'_, PyType>, py: Python<'_>, path: String) -> PyResult<Self> {
+        py.allow_threads(|| {
+            let file = std::fs::File::open(&path)
+                .map_err(|e| PyErr::new::<PyIOError, _>(format!("Unable to read file: {e}")))?;
+            let reader = BufReader::new(file);
+            let mut loaded: Self = rmp_serde::from_read(reader)
+                .map_err(|e| PyErr::new::<PyValueError, _>(format!("Invalid BM25 msgpack: {e}")))?;
+            loaded.update_average_length();
+            loaded.is_frozen = false;
+            Ok(loaded)
+        })
+    }
+
+    fn save_msgpack(&self, py: Python<'_>, path: String) -> PyResult<()> {
+        py.allow_threads(|| {
+            let file = std::fs::File::create(&path)
+                .map_err(|e| PyErr::new::<PyIOError, _>(format!("Unable to write file: {e}")))?;
+            let mut writer = BufWriter::new(file);
+            rmp_serde::encode::write(&mut writer, &self)
+                .map_err(|e| PyErr::new::<PyValueError, _>(format!("Unable to serialize BM25: {e}")))?;
+            Ok(())
+        })
+    }
+
     fn get_freeze_map(&self) -> PyResult<HashMap<String, HashMap<String, f32>>> {
         Ok(self.freeze_map.clone())
     }
@@ -720,6 +745,21 @@ mod tests {
         assert_eq!(decoded.doc_texts.get("d1").unwrap(), "hello world");
         assert_eq!(decoded.doc_texts.get("d2").unwrap(), "foo bar");
         assert!(decoded.freeze_map.is_empty()); // skipped by serde
+    }
+
+    #[test]
+    fn test_msgpack_roundtrip() {
+        let mut bm25 = make_bm25();
+        add_doc(&mut bm25, "d1", vec!["hello", "world"], "hello world");
+        add_doc(&mut bm25, "d2", vec!["foo", "bar"], "foo bar");
+
+        let encoded = rmp_serde::to_vec(&bm25).unwrap();
+        let decoded: BM25 = rmp_serde::from_slice(&encoded).unwrap();
+
+        assert_eq!(decoded.doc_len_map.len(), 2);
+        assert_eq!(decoded.doc_texts.get("d1").unwrap(), "hello world");
+        assert_eq!(decoded.doc_texts.get("d2").unwrap(), "foo bar");
+        assert!(decoded.freeze_map.is_empty());
     }
 
     #[test]
